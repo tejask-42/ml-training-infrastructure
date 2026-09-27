@@ -1,0 +1,1915 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A from-first-principles study of ML pipeline orchestration on Kubernetes: container primitives, Argo Workflows DAG orchestration, and empirical benchmarks on data movement patterns at scale.
+">
+      
+      
+      
+        <link rel="canonical" href="https://tejask-42.github.io/ml-training-infrastructure/foundations/docker/">
+      
+      
+        <link rel="prev" href="../why-distributed/">
+      
+      
+        <link rel="next" href="../kubernetes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Docker - ML Training Infrastructure</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#docker-mechanics-container-isolation-and-runtime-primitives" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="ML Training Infrastructure" class="md-header__button md-logo" aria-label="ML Training Infrastructure" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ML Training Infrastructure
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Docker
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tejask-42/ml-training-infrastructure" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tejask-42/ml-training-infrastructure
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../why-distributed/" class="md-tabs__link">
+          
+  
+  
+  Foundations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../argo-workflows/why-argo/" class="md-tabs__link">
+          
+  
+  
+  Argo Workflows
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../experiments/data-movement/" class="md-tabs__link">
+          
+  
+  
+  Experiments
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="ML Training Infrastructure" class="md-nav__button md-logo" aria-label="ML Training Infrastructure" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ML Training Infrastructure
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tejask-42/ml-training-infrastructure" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    tejask-42/ml-training-infrastructure
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Foundations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Foundations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../why-distributed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why Distributed Computing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#containers-vs-virtual-machines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Containers vs. Virtual Machines
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Containers vs. Virtual Machines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#hypervisors-vs-shared-host-kernel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hypervisors vs. Shared Host Kernel
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linux-namespaces-the-visibility-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux Namespaces: The Visibility Boundary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Linux Namespaces: The Visibility Boundary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-mechanics-of-process-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Mechanics of Process Isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-system-calls-behind-namespaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The System Calls Behind Namespaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linux-cgroups-control-groups-resource-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux Cgroups (Control Groups): Resource Constraints
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Linux Cgroups (Control Groups): Resource Constraints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cpu-limits-throttling-not-killing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU Limits: Throttling, Not Killing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#memory-limits-and-the-oom-kill-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Memory Limits and the OOM Kill Sequence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-images-layering-copy-on-write-and-build-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Images: Layering, Copy-on-Write, and Build Caching
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Docker Images: Layering, Copy-on-Write, and Build Caching">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-layer-stack-slow-moving-foundation-to-fast-moving-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Layer Stack: Slow-Moving Foundation to Fast-Moving Application
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modifying-files-at-runtime-copy-on-write-cow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modifying Files at Runtime: Copy-on-Write (CoW)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Modifying Files at Runtime: Copy-on-Write (CoW)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#practical-lifecycle-stopped-vs-deleted-containers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Practical Lifecycle: Stopped vs. Deleted Containers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-caching-how-docker-accelerates-builds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Caching: How Docker Accelerates Builds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optimizing-dockerfile-layer-order-for-fast-rebuilds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optimizing Dockerfile Layer Order for Fast Rebuilds
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#container-networking-how-isolated-containers-communicate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container Networking: How Isolated Containers Communicate
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Container Networking: How Isolated Containers Communicate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-connecting-containers-on-the-same-host-the-docker-bridge-docker0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Connecting Containers on the Same Host: The Docker Bridge (docker0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-outbound-traffic-how-containers-reach-s3-and-the-internet-nat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Outbound Traffic: How Containers Reach S3 and the Internet (NAT)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-inbound-traffic-exposing-container-services-port-publishing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Inbound Traffic: Exposing Container Services (Port Publishing)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#volumes-vs-bind-mounts-managing-data-durability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volumes vs. Bind Mounts: Managing Data Durability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-docker-alone-fails-for-distributed-ml-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Docker Alone Fails for Distributed ML Pipelines
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Why Docker Alone Fails for Distributed ML Pipelines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#official-documentation-further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Official Documentation &amp; Further Reading
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Argo Workflows
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Argo Workflows
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../argo-workflows/why-argo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Why Argo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../argo-workflows/internals/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experiments
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Experiments
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../experiments/data-movement/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Movement at Scale
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#containers-vs-virtual-machines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Containers vs. Virtual Machines
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Containers vs. Virtual Machines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#hypervisors-vs-shared-host-kernel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hypervisors vs. Shared Host Kernel
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linux-namespaces-the-visibility-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux Namespaces: The Visibility Boundary
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Linux Namespaces: The Visibility Boundary">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-mechanics-of-process-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Mechanics of Process Isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-system-calls-behind-namespaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The System Calls Behind Namespaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#linux-cgroups-control-groups-resource-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux Cgroups (Control Groups): Resource Constraints
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Linux Cgroups (Control Groups): Resource Constraints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cpu-limits-throttling-not-killing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CPU Limits: Throttling, Not Killing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#memory-limits-and-the-oom-kill-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Memory Limits and the OOM Kill Sequence
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-images-layering-copy-on-write-and-build-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Images: Layering, Copy-on-Write, and Build Caching
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Docker Images: Layering, Copy-on-Write, and Build Caching">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-layer-stack-slow-moving-foundation-to-fast-moving-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Layer Stack: Slow-Moving Foundation to Fast-Moving Application
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modifying-files-at-runtime-copy-on-write-cow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modifying Files at Runtime: Copy-on-Write (CoW)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Modifying Files at Runtime: Copy-on-Write (CoW)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#practical-lifecycle-stopped-vs-deleted-containers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Practical Lifecycle: Stopped vs. Deleted Containers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-caching-how-docker-accelerates-builds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build Caching: How Docker Accelerates Builds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optimizing-dockerfile-layer-order-for-fast-rebuilds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optimizing Dockerfile Layer Order for Fast Rebuilds
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#container-networking-how-isolated-containers-communicate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Container Networking: How Isolated Containers Communicate
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Container Networking: How Isolated Containers Communicate">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-connecting-containers-on-the-same-host-the-docker-bridge-docker0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Connecting Containers on the Same Host: The Docker Bridge (docker0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-outbound-traffic-how-containers-reach-s3-and-the-internet-nat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Outbound Traffic: How Containers Reach S3 and the Internet (NAT)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-inbound-traffic-exposing-container-services-port-publishing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Inbound Traffic: Exposing Container Services (Port Publishing)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#volumes-vs-bind-mounts-managing-data-durability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Volumes vs. Bind Mounts: Managing Data Durability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-docker-alone-fails-for-distributed-ml-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why Docker Alone Fails for Distributed ML Pipelines
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Why Docker Alone Fails for Distributed ML Pipelines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#official-documentation-further-reading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Official Documentation &amp; Further Reading
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="docker-mechanics-container-isolation-and-runtime-primitives">Docker Mechanics: Container Isolation and Runtime Primitives<a class="headerlink" href="#docker-mechanics-container-isolation-and-runtime-primitives" title="Permanent link">&para;</a></h1>
+<p>In distributed machine learning, reproducibility is a strict operational requirement. An ML training pipeline might run data preprocessing on a 16-core CPU machine, model training across four GPU nodes, and model evaluation on a separate inference benchmark server.</p>
+<p>If each server relies on manually installed Python interpreters, system-level CUDA drivers, and package dependencies, the pipeline will inevitably experience environment drift:
+- Code fails because Node A runs Python 3.10 while Node B runs Python 3.11.
+- A C-extension or linear algebra library (<code>OpenBLAS</code>, <code>MKL</code>) compiled against specific CPU instructions is missing on another node.
+- A transitive dependency mismatch produces silent numerical divergence during gradient updates.</p>
+<p>Docker solves this challenge by packaging an application, its system libraries, runtime environment, and configuration into an immutable, portable unit called a <strong>container image</strong>. </p>
+<p>To use containers effectively in production infrastructure, one must understand how they operate at the Linux kernel level: how process isolation is enforced, how resources are constrained, and how copy-on-write storage functions under the hood.</p>
+<hr />
+<h2 id="containers-vs-virtual-machines">Containers vs. Virtual Machines<a class="headerlink" href="#containers-vs-virtual-machines" title="Permanent link">&para;</a></h2>
+<p>Both Virtual Machines (VMs) and containers provide isolated execution environments, but they achieve isolation at fundamentally different layers of the computing stack.</p>
+<pre class="mermaid"><code>flowchart TD
+    subgraph VMArchitecture ["Virtual Machine Architecture"]
+        direction TB
+        AppVM["ML Application (Python / PyTorch)"]
+        GuestOS["Guest Operating System (Full Kernel, systemd, drivers)"]
+        Hypervisor["Hypervisor (Type 1 or Type 2: KVM, ESXi, VirtualBox)"]
+        HostHW1["Host Physical Hardware"]
+
+        AppVM --&gt; GuestOS
+        GuestOS --&gt; Hypervisor
+        Hypervisor --&gt; HostHW1
+    end
+
+    subgraph ContainerArchitecture ["Container Architecture"]
+        direction TB
+        AppC["ML Application (Python / PyTorch)"]
+        Isolation["Linux Kernel Primitives (Namespaces, Cgroups, Seccomp)"]
+        HostKernel["Shared Host Linux Kernel"]
+        HostHW2["Host Physical Hardware"]
+
+        AppC --&gt; Isolation
+        Isolation --&gt; HostKernel
+        HostKernel --&gt; HostHW2
+    end</code></pre>
+<h3 id="hypervisors-vs-shared-host-kernel">Hypervisors vs. Shared Host Kernel<a class="headerlink" href="#hypervisors-vs-shared-host-kernel" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Virtual Machines</strong>:</li>
+<li>A Virtual Machine relies on a <strong>hypervisor</strong> (such as KVM, Xen, or ESXi). The hypervisor emulates physical hardware (virtual CPUs, virtual RAM, virtual network interfaces, and virtual storage controllers).</li>
+<li>On top of this emulated hardware, the VM runs a complete <strong>Guest Operating System</strong>, including its own Linux kernel, system initialization daemon (<code>systemd</code>), device drivers, and background daemons.</li>
+<li><strong>Overhead</strong>: Running a guest kernel requires hundreds of megabytes to gigabytes of dedicated RAM just to boot the OS. Starting a VM takes tens of seconds to minutes. Hardware instruction translation through the hypervisor introduces CPU and I/O virtualization overhead.</li>
+<li><strong>Containers</strong>:</li>
+<li>A container has <strong>no kernel of its own</strong>. It shares the host machine's Linux kernel directly.</li>
+<li>A container process is fundamentally an <strong>ordinary host Linux process</strong> executing in user space, but wrapped in operating system boundary controls that restrict what it can see, what resources it can consume, and which system calls it can execute.</li>
+<li><strong>Overhead</strong>: Because there is no guest kernel to boot and no hardware to emulate, containers launch in milliseconds. Container processes execute machine instructions directly on host CPU cores with zero virtualization penalty.</li>
+</ol>
+<div class="admonition note">
+<p class="admonition-title">What About Docker Desktop on macOS and Windows?</p>
+<p>The Linux kernel primitives that make containers possible (namespaces and cgroups) exist exclusively in Linux. When running Docker Desktop on macOS or Windows, Docker transparently runs a lightweight, headless Linux virtual machine in the background. The Docker CLI on the host communicates with the Docker daemon running inside that Linux VM, and your containers execute within the VM's shared Linux kernel.</p>
+</div>
+<hr />
+<h2 id="linux-namespaces-the-visibility-boundary">Linux Namespaces: The Visibility Boundary<a class="headerlink" href="#linux-namespaces-the-visibility-boundary" title="Permanent link">&para;</a></h2>
+<p>A container's illusion of having its own dedicated operating system is created by <strong>Linux Namespaces</strong>. Namespaces restrict <strong>what a process can see</strong> by partitioning global kernel resources into discrete, isolated views.</p>
+<p>The Linux kernel implements six core namespaces utilized by container runtimes:</p>
+<table>
+<thead>
+<tr>
+<th>Namespace</th>
+<th>Kernel Flag</th>
+<th>What It Isolates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>PID</strong></td>
+<td><code>CLONE_NEWPID</code></td>
+<td>Process IDs. A container process sees itself as PID 1, while having an ordinary PID on the host.</td>
+</tr>
+<tr>
+<td><strong>NET</strong></td>
+<td><code>CLONE_NEWNET</code></td>
+<td>Network devices, IP routing tables, firewall rules, port bindings, and sockets.</td>
+</tr>
+<tr>
+<td><strong>MNT</strong></td>
+<td><code>CLONE_NEWNS</code></td>
+<td>Filesystem mount points. Isolates the container's root directory (<code>/</code>) from the host filesystem.</td>
+</tr>
+<tr>
+<td><strong>IPC</strong></td>
+<td><code>CLONE_NEWIPC</code></td>
+<td>Inter-Process Communication resources: System V IPC message queues, semaphores, and POSIX shared memory.</td>
+</tr>
+<tr>
+<td><strong>UTS</strong></td>
+<td><code>CLONE_NEWUTS</code></td>
+<td>System identifiers: Hostname and NIS domain name.</td>
+</tr>
+<tr>
+<td><strong>USER</strong></td>
+<td><code>CLONE_NEWUSER</code></td>
+<td>User and Group IDs. Allows a process to run with UID 0 (root) inside the container while mapping to an unprivileged UID on the host.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-mechanics-of-process-isolation">The Mechanics of Process Isolation<a class="headerlink" href="#the-mechanics-of-process-isolation" title="Permanent link">&para;</a></h3>
+<p>When you run an ML training script inside a container:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>python:3.10<span class="w"> </span>python<span class="w"> </span>train.py
+</span></code></pre></div>
+<p>Inside the container, inspecting the process tree reveals:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a># Inside container namespace
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>PID   USER     TIME   COMMAND
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  1   root     0:02   python train.py
+</span></code></pre></div>
+<p>However, if you inspect the host operating system's process table simultaneously, you see the exact same process:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a># On host operating system
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>PID     USER     TIME   COMMAND
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>48291   root     0:02   python train.py
+</span></code></pre></div>
+<p>The process is not executing in a separate machine. It is executing directly on the host kernel. The kernel's PID translation layer maps PID <code>48291</code> in the root PID namespace to PID <code>1</code> inside the container's private PID namespace. Because PID 1 is isolated, the process cannot inspect, signal, or terminate any process outside its own namespace.</p>
+<h3 id="the-system-calls-behind-namespaces">The System Calls Behind Namespaces<a class="headerlink" href="#the-system-calls-behind-namespaces" title="Permanent link">&para;</a></h3>
+<p>Container runtimes (such as <code>runc</code>, which Docker and containerd invoke) configure namespaces using three low-level Linux system calls:</p>
+<ol>
+<li><strong><code>clone()</code></strong>: Spawns a new child process similar to <code>fork()</code>, but accepts bitwise flags specifying which namespaces to create for the child (e.g., <code>clone(..., CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWNS)</code>).</li>
+<li><strong><code>unshare()</code></strong>: Disassociates the calling process from its current parent namespaces and moves it into newly initialized namespaces without spawning a child.</li>
+<li><strong><code>setns()</code></strong>: Attaches the calling process to an already existing namespace identified by an open file descriptor in <code>/proc/&lt;PID&gt;/ns/</code>. This syscall is the exact mechanism used by <code>docker exec</code>: it attaches a new shell process to the existing namespaces of a running container.</li>
+</ol>
+<hr />
+<h2 id="linux-cgroups-control-groups-resource-constraints">Linux Cgroups (Control Groups): Resource Constraints<a class="headerlink" href="#linux-cgroups-control-groups-resource-constraints" title="Permanent link">&para;</a></h2>
+<p>While namespaces control <strong>what a process can see</strong>, Linux <strong>Cgroups (Control Groups)</strong> control <strong>what resources a process can consume</strong>.</p>
+<p>Without cgroups, a single runaway Python training process could allocate all system RAM, causing the host operating system to freeze and crashing adjacent services. Modern container runtimes rely on <strong>cgroups v2</strong>, which organizes processes into a unified, hierarchical filesystem tree located under <code>/sys/fs/cgroup/</code>.</p>
+<p>Inside a container's cgroup directory, the kernel exposes controller files that enforce resource quotas:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>/sys/fs/cgroup/docker/&lt;container-id&gt;/
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>  ├── cpu.max         # CPU bandwidth quota
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>  ├── cpu.weight      # Relative CPU scheduling priority
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  ├── memory.max      # Hard memory limit (triggers OOM kill)
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>  ├── memory.high     # High watermark memory throttle
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>  └── memory.current  # Real-time memory consumption
+</span></code></pre></div>
+<h3 id="cpu-limits-throttling-not-killing">CPU Limits: Throttling, Not Killing<a class="headerlink" href="#cpu-limits-throttling-not-killing" title="Permanent link">&para;</a></h3>
+<p>CPU constraints are governed by the <code>cpu.max</code> file, which defines bandwidth limits using two values: <strong>quota</strong> and <strong>period</strong> (in microseconds):</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a># Allow 2 CPU cores of compute time every 100ms period
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a># 200,000 microseconds / 100,000 microseconds = 2.0 CPUs
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>echo "200000 100000" &gt; /sys/fs/cgroup/docker/&lt;container-id&gt;/cpu.max
+</span></code></pre></div>
+<p>When a container runs CPU-intensive operations (such as data normalization or image augmentation), the kernel's Completely Fair Scheduler (CFS) tracks the container's CPU run time. Once the container consumes its allotted 200ms of CPU time within a 100ms window, the scheduler unschedules the process threads. The process is <strong>throttled</strong> until the current period expires, running slower but remaining alive.</p>
+<h3 id="memory-limits-and-the-oom-kill-sequence">Memory Limits and the OOM Kill Sequence<a class="headerlink" href="#memory-limits-and-the-oom-kill-sequence" title="Permanent link">&para;</a></h3>
+<p>Memory constraints are governed by <code>memory.max</code> and <code>memory.high</code>. Unlike CPU limits, memory cannot be throttled once allocated. If a process requires 12 GB of RAM and its limit is 8 GB, physical space cannot be compressed.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a># Set an 8 GB hard memory limit
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>echo "8589934592" &gt; /sys/fs/cgroup/docker/&lt;container-id&gt;/memory.max
+</span></code></pre></div>
+<p>When a container process allocates memory beyond <code>memory.max</code>, the Linux kernel triggers a precise sequence:</p>
+<pre class="mermaid"><code>flowchart TD
+    Alloc["Container process allocates memory&lt;br/&gt;(via brk() or mmap() syscall)"]
+    Check{"Does usage exceed&lt;br/&gt;memory.max?"}
+    Continue["Kernel fulfills page allocation&lt;br/&gt;Process continues execution"]
+    Reclaim["Kernel enters synchronous page reclaim&lt;br/&gt;Drops clean page caches, flushes dirty pages"]
+    Recheck{"Is memory usage&lt;br/&gt;still &gt; memory.max?"}
+    OOM["Kernel invokes cgroup OOM Killer"]
+    Pick["Evaluates oom_score across container processes&lt;br/&gt;Selects highest memory consumer"]
+    Kill["Kernel sends uncatchable SIGKILL (Signal 9)&lt;br/&gt;Container terminates with Exit Code 137"]
+
+    Alloc --&gt; Check
+    Check --&gt;|No| Continue
+    Check --&gt;|Yes| Reclaim
+    Reclaim --&gt; Recheck
+    Recheck --&gt;|No - Freed enough memory| Continue
+    Recheck --&gt;|Yes - Still exceeding limit| OOM
+    OOM --&gt; Pick
+    Pick --&gt; Kill</code></pre>
+<ol>
+<li><strong>Allocation Request</strong>: The Python application requests memory via <code>brk()</code> or <code>mmap()</code>.</li>
+<li><strong>Limit Evaluation</strong>: The kernel's memory controller checks the cgroup's total usage (anonymous memory + page cache) against <code>memory.max</code>.</li>
+<li><strong>Synchronous Page Reclaim</strong>: If the allocation would exceed <code>memory.max</code>, the kernel immediately stalls the calling process and attempts synchronous memory reclamation: it evicts unmapped file page caches and writes dirty pages to disk.</li>
+<li><strong>Cgroup OOM Killer</strong>: If page reclaim cannot reduce memory usage below <code>memory.max</code>, the kernel triggers the cgroup-scoped OOM killer.</li>
+<li><strong>Target Selection</strong>: The kernel scans all processes assigned to that specific cgroup, identifies the process with the largest memory footprint, and issues an uncatchable <code>SIGKILL</code> (signal 9).</li>
+<li><strong>Container Termination</strong>: The primary process (PID 1 inside the container) dies. Because PID 1 has exited, the kernel tears down the container's PID namespace. The Docker daemon reports that the container exited with <strong>Exit Code 137</strong> (128 + 9).</li>
+</ol>
+<hr />
+<h2 id="docker-images-layering-copy-on-write-and-build-caching">Docker Images: Layering, Copy-on-Write, and Build Caching<a class="headerlink" href="#docker-images-layering-copy-on-write-and-build-caching" title="Permanent link">&para;</a></h2>
+<p>A container image is not a single monolithic archive or a virtual machine hard drive. Instead, a Docker image is constructed as an <strong>ordered stack of read-only layers</strong>, where each layer represents the filesystem changes introduced by a specific instruction in a <code>Dockerfile</code>.</p>
+<p>Understanding how these layers stack, how they handle modifications, and how Docker caches them during builds is essential for building fast, reliable machine learning pipelines.</p>
+<pre class="mermaid"><code>flowchart TD
+    subgraph ContainerRun ["Running Container Instance"]
+        direction TB
+        TopLayer["Thin Writable Layer (Read-Write)&lt;br/&gt;Temporary container scratch space: new files &amp; edits"]
+    end
+
+    subgraph ImageLayers ["Immutable Base Image (Read-Only Stack)"]
+        direction TB
+        L4["Layer 4: Application Source Code (src/, train.py)&lt;br/&gt;Fast-moving: changes every code edit"]
+        L3["Layer 3: Python ML Dependencies (PyTorch, scikit-learn)&lt;br/&gt;Medium-moving: changes when requirements.txt updates"]
+        L2["Layer 2: System Packages &amp; CUDA Runtime&lt;br/&gt;Slow-moving: changes when updating base environment"]
+        L1["Layer 1: Base Operating System (Ubuntu 22.04)&lt;br/&gt;Foundational: rarely changes"]
+
+        L4 --&gt; L3
+        L3 --&gt; L2
+        L2 --&gt; L1
+    end
+
+    TopLayer -.-&gt;|Modifications isolated to top layer| L4</code></pre>
+<h3 id="the-layer-stack-slow-moving-foundation-to-fast-moving-application">The Layer Stack: Slow-Moving Foundation to Fast-Moving Application<a class="headerlink" href="#the-layer-stack-slow-moving-foundation-to-fast-moving-application" title="Permanent link">&para;</a></h3>
+<p>Image layers are organized hierarchically based on how frequently their contents change:</p>
+<ol>
+<li><strong>Foundational Lower Layers (Slow-Moving)</strong>:
+   The bottom of the stack contains the base operating system (e.g., Ubuntu), system-level drivers (such as NVIDIA CUDA runtime libraries), and core developer tools. Because these components rarely change, they form the stable anchor of your infrastructure.</li>
+<li><strong>Application Upper Layers (Fast-Moving)</strong>:
+   The top of the stack contains package requirements, configuration files, and application source code (<code>train.py</code>, data loading routines). In an active project, code files change dozens of times a day.</li>
+<li><strong>Cross-Container Layer Sharing</strong>:
+   Because image layers are strictly read-only, they can be shared across multiple containers without conflict. If ten different training containers run on the same GPU worker node using the same PyTorch image, the 15 GB base image is stored on host disk only once. Each container references the identical underlying layers.</li>
+</ol>
+<hr />
+<h3 id="modifying-files-at-runtime-copy-on-write-cow">Modifying Files at Runtime: Copy-on-Write (CoW)<a class="headerlink" href="#modifying-files-at-runtime-copy-on-write-cow" title="Permanent link">&para;</a></h3>
+<p>When Docker starts a container, it freezes the image layers as read-only and adds a thin, temporary <strong>writable layer</strong> directly on top of the stack.</p>
+<p>All read and write operations inside the running container pass through this stacked view:</p>
+<ul>
+<li><strong>Reading Files</strong>: When a process reads a file (e.g., importing a Python package baked into Layer 3), Docker scans the stack from top to bottom and serves the file from the layer where it exists.</li>
+<li><strong>Creating New Files</strong>: When a training script generates an output log or an evaluation plot, the new file is written directly into the top writable layer. The underlying image layers are never touched.</li>
+<li><strong>Modifying Existing Files (Copy-on-Write)</strong>: If a container modifies a configuration file that already exists in one of the lower image layers, Docker does not mutate the original file (which would corrupt the image for other containers). Instead, Docker makes a duplicate copy of that file, places the copy in the container's top writable layer, and applies the modification there. The copy in the top layer hides the original version below it.</li>
+</ul>
+<pre class="mermaid"><code>flowchart TD
+    subgraph ReadOperation ["Reading a Base File"]
+        R_Container["Container Process"] --&gt;|Reads /opt/conda/...| R_Image["Underlying Read-Only Image Layer&lt;br/&gt;(File served directly with zero copy)"]
+    end
+
+    subgraph WriteOperation ["Modifying an Existing File (Copy-on-Write)"]
+        W_Container["Container Process"] --&gt;|Writes to /etc/config.json| W_Top["Top Writable Layer&lt;br/&gt;(Entire file copied up before write)"]
+        W_Top -.-&gt;|Hides original| W_Base["Original File in Read-Only Layer&lt;br/&gt;(Remains pristine and untouched)"]
+    end</code></pre>
+<h4 id="practical-lifecycle-stopped-vs-deleted-containers">Practical Lifecycle: Stopped vs. Deleted Containers<a class="headerlink" href="#practical-lifecycle-stopped-vs-deleted-containers" title="Permanent link">&para;</a></h4>
+<p>Understanding the top writable layer clarifies how container lifecycles behave:</p>
+<ul>
+<li><strong><code>docker stop</code></strong>: Stops the container's running processes. The top writable layer remains preserved on host disk. If you run <code>docker start</code>, the container resumes with all previous in-container filesystem modifications intact.</li>
+<li><strong><code>docker rm</code></strong>: Permanently deletes the top writable layer and discards all uncommitted data written inside the container. The underlying base image remains untouched in the local cache.</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">Why You Should Never Write Datasets to the Container Layer</p>
+<p>Because modifying an existing file triggers a copy to the top layer, opening a large pre-baked dataset or model file in write mode forces Docker to duplicate the entire file into the container's temporary layer. Furthermore, any files written directly into the container are destroyed when the container is deleted. Production ML pipelines never store raw datasets or model checkpoints inside container layers; they attach external storage using volumes or stream directly from object storage.</p>
+</div>
+<hr />
+<h3 id="build-caching-how-docker-accelerates-builds">Build Caching: How Docker Accelerates Builds<a class="headerlink" href="#build-caching-how-docker-accelerates-builds" title="Permanent link">&para;</a></h3>
+<p>When you build an image with <code>docker build</code>, Docker evaluates each instruction in the <code>Dockerfile</code> sequentially from top to bottom:</p>
+<ol>
+<li><strong>Content Checksums and Cache Hits</strong>:</li>
+<li>For commands like <code>RUN apt-get install</code>, Docker checks if the exact text of the command has been built before on top of the same parent layer.</li>
+<li>For file copies like <code>COPY requirements.txt .</code>, Docker computes a checksum of the files being copied from your laptop. If the checksum matches what was previously built, Docker skips execution entirely and reuses the cached layer (<code>Using cache</code>).</li>
+<li><strong>The Invalidation Cascade</strong>:</li>
+<li>Docker's build cache operates as a strict dependency chain. Once an instruction changes (a <strong>cache bust</strong>), <strong>every single instruction following it is invalidated and forced to re-execute from scratch</strong>. Docker cannot reuse cached layers that depend on an altered foundation.</li>
+</ol>
+<pre class="mermaid"><code>flowchart TD
+    subgraph Step1 ["Step 1: Unchanged Layer"]
+        S1["RUN apt-get update &amp;&amp; install ..."] --&gt;|Exact match| C1["Reused from Cache (0.1s)"]
+    end
+
+    subgraph Step2 ["Step 2: Modified File (Cache Bust)"]
+        S2["COPY requirements.txt ."] --&gt;|File checksum changed| C2["Cache Busted: Layer Rebuilt"]
+    end
+
+    subgraph Step3 ["Step 3: Downstream Cascade"]
+        S3["RUN pip install -r requirements.txt"] --&gt;|Parent layer changed| C3["Forced Rebuild: Re-executes pip (5-10 min)"]
+        S4["COPY src/ /app/src/"] --&gt;|Parent layer changed| C4["Forced Rebuild: Re-copies code"]
+    end
+
+    C1 --&gt; S2
+    C2 --&gt; S3
+    C3 --&gt; S4</code></pre>
+<hr />
+<h3 id="optimizing-dockerfile-layer-order-for-fast-rebuilds">Optimizing Dockerfile Layer Order for Fast Rebuilds<a class="headerlink" href="#optimizing-dockerfile-layer-order-for-fast-rebuilds" title="Permanent link">&para;</a></h3>
+<p>Because cache invalidation cascades downward, the most critical optimization in any ML Dockerfile is ordering instructions strictly from <strong>slowest-changing at the bottom to fastest-changing at the top</strong>:</p>
+<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c"># 1. Base image (changes once every few months): cached permanently</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s">nvidia/cuda:12.1.1-runtime-ubuntu22.04</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c"># 2. System dependencies (slow-changing): cached</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="k">RUN</span><span class="w"> </span>apt-get<span class="w"> </span>update<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>apt-get<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>--no-install-recommends<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">    </span>python3-pip<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="w">    </span>python3-dev<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="w">    </span>git<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="w">    </span><span class="o">&amp;&amp;</span><span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>/var/lib/apt/lists/*
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="c"># 3. Python package declarations (medium-changing): cached</span>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="k">WORKDIR</span><span class="w"> </span><span class="s">/app</span>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="k">COPY</span><span class="w"> </span>requirements.txt<span class="w"> </span>.
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="c"># 4. Heavy dependency installation (slowest build step: 5-10 minutes):</span>
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="c"># Rebuilt ONLY when requirements.txt actually changes!</span>
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="k">RUN</span><span class="w"> </span>pip3<span class="w"> </span>install<span class="w"> </span>--no-cache-dir<span class="w"> </span>-r<span class="w"> </span>requirements.txt
+</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>
+</span><span id="__span-6-19"><a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a><span class="c"># 5. Application source code (changes on almost every commit):</span>
+</span><span id="__span-6-20"><a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a><span class="c"># Placed at the very bottom so code edits rebuild in 1-2 seconds</span>
+</span><span id="__span-6-21"><a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a><span class="k">COPY</span><span class="w"> </span>src/<span class="w"> </span>/app/src/
+</span><span id="__span-6-22"><a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>
+</span><span id="__span-6-23"><a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a><span class="k">ENTRYPOINT</span><span class="w"> </span><span class="p">[</span><span class="s2">"python3"</span><span class="p">,</span><span class="w"> </span><span class="s2">"/app/src/train.py"</span><span class="p">]</span>
+</span></code></pre></div>
+<p>If you mistakenly place <code>COPY src/ /app/src/</code> <em>before</em> <code>RUN pip3 install</code>, every minor typo fix or logging change in Python will bust the cache, forcing Docker to redownload and reinstall gigabytes of PyTorch and CUDA dependencies on every build. By placing source code at the very bottom, code edits rebuild virtually instantaneously.</p>
+<hr />
+<h2 id="container-networking-how-isolated-containers-communicate">Container Networking: How Isolated Containers Communicate<a class="headerlink" href="#container-networking-how-isolated-containers-communicate" title="Permanent link">&para;</a></h2>
+<p>By default, Docker places every container inside its own private network namespace. This creates total network isolation:
+- The container has its own private network interface (<code>eth0</code>) and its own loopback (<code>localhost</code>).
+- The container has its own private IP address (typically in an internal range like <code>172.17.0.x</code>).
+- Processes inside the container cannot see or bind to ports on the host machine.</p>
+<p>While this isolation prevents port collisions (e.g., two different containers can both safely listen on port 8080), a container cannot do useful machine learning work in complete isolation. An ML container needs to:
+1. Communicate with other containers running on the same machine (e.g., a training script talking to a local Redis cache or PostgreSQL database).
+2. Download datasets from external object stores (MinIO, S3) and pull dependencies over the internet.
+3. Expose services (like a Jupyter notebook, MLflow tracking server, or model inference API) so external users can connect.</p>
+<p>Docker accomplishes this by building software networking primitives directly on top of the host operating system.</p>
+<pre class="mermaid"><code>flowchart TD
+    subgraph ExternalWorld ["External Network / Internet"]
+        S3["Object Storage (MinIO / S3)&lt;br/&gt;or Model Registry"]
+        Client["User Browser / External Client&lt;br/&gt;Connecting to port 8080"]
+    end
+
+    subgraph HostMachine ["Host Operating System"]
+        direction TB
+        HostNIC["Physical Network Card (eth0)&lt;br/&gt;Host IP: 192.168.1.50"]
+        Bridge["Docker Virtual Bridge (docker0)&lt;br/&gt;Virtual Software Switch: 172.17.0.1/16"]
+
+        HostNIC &lt;--&gt;|NAT &amp; Port Forwarding| Bridge
+    end
+
+    subgraph ContainerA ["Container A: Model Trainer"]
+        VethA["Container eth0&lt;br/&gt;IP: 172.17.0.2"]
+        TrainProc["Python Training Process&lt;br/&gt;Streaming data from S3"]
+        VethA &lt;--&gt; TrainProc
+    end
+
+    subgraph ContainerB ["Container B: MLflow Server"]
+        VethB["Container eth0&lt;br/&gt;IP: 172.17.0.3"]
+        WebProc["Tracking UI Process&lt;br/&gt;Listening on Port 5000"]
+        VethB &lt;--&gt; WebProc
+    end
+
+    Bridge &lt;--&gt;|Virtual Ethernet Cable| VethA
+    Bridge &lt;--&gt;|Virtual Ethernet Cable| VethB
+    HostNIC &lt;--&gt;|Outbound Requests via NAT| S3
+    Client &lt;--&gt;|Inbound Port Forward 8080 to 5000| HostNIC</code></pre>
+<h3 id="1-connecting-containers-on-the-same-host-the-docker-bridge-docker0">1. Connecting Containers on the Same Host: The Docker Bridge (<code>docker0</code>)<a class="headerlink" href="#1-connecting-containers-on-the-same-host-the-docker-bridge-docker0" title="Permanent link">&para;</a></h3>
+<p>To let multiple containers talk to each other without exposing them to the wider local network, Docker constructs a <strong>virtual software switch</strong> called <strong><code>docker0</code></strong> on the host machine:</p>
+<ul>
+<li><strong>The Virtual Cable (<code>veth</code> pair)</strong>:
+  When a container is created, the Linux kernel creates a virtual network link with two ends, functioning exactly like a virtual Ethernet cable. One end of the cable is placed inside the container and named <code>eth0</code>. The opposite end remains on the host and plugs directly into the <code>docker0</code> bridge.</li>
+<li><strong>Direct Container-to-Container Traffic</strong>:
+  Every container connected to <code>docker0</code> receives a private IP address within the same subnet (such as <code>172.17.0.2</code> and <code>172.17.0.3</code>). Because they share the same virtual switch, Container A can send network traffic directly to Container B simply by connecting to Container B's private IP.</li>
+</ul>
+<hr />
+<h3 id="2-outbound-traffic-how-containers-reach-s3-and-the-internet-nat">2. Outbound Traffic: How Containers Reach S3 and the Internet (NAT)<a class="headerlink" href="#2-outbound-traffic-how-containers-reach-s3-and-the-internet-nat" title="Permanent link">&para;</a></h3>
+<p>When an ML script inside a container initiates an outbound request (for example, fetching a 10 GB dataset partition from an external MinIO or S3 endpoint):</p>
+<ol>
+<li><strong>The Routing Dilemma</strong>:
+   The container sends packets from its private IP (<code>172.17.0.2</code>) directed toward the external S3 server. However, private IP addresses (<code>172.17.0.x</code>) are not routable on external corporate networks or the public internet. If the packet left the host with a return address of <code>172.17.0.2</code>, the external server would have no idea how to send data back.</li>
+<li><strong>Network Address Translation (NAT)</strong>:
+   As the packet leaves the container across the <code>docker0</code> bridge and reaches the host's physical network card, the Linux kernel performs <strong>Network Address Translation (NAT)</strong>. The kernel replaces the container's private return address with the host machine's own physical IP address (e.g., <code>192.168.1.50</code>).</li>
+<li><strong>Transparent Return</strong>:
+   When the external S3 server replies, it sends the data packets back to <code>192.168.1.50</code>. The host kernel recognizes the connection, translates the destination back to <code>172.17.0.2</code>, and passes the incoming data across the bridge into the container. To the external server, all traffic appears to originate directly from the host machine.</li>
+</ol>
+<hr />
+<h3 id="3-inbound-traffic-exposing-container-services-port-publishing">3. Inbound Traffic: Exposing Container Services (Port Publishing)<a class="headerlink" href="#3-inbound-traffic-exposing-container-services-port-publishing" title="Permanent link">&para;</a></h3>
+<p>While outbound traffic happens automatically via NAT, incoming traffic from the outside world cannot reach a container by default because external machines cannot see internal <code>172.17.0.x</code> addresses.</p>
+<p>If you run an MLflow tracking server or a Triton model serving API inside a container listening on port <code>5000</code>, outside team members cannot access it unless you explicitly <strong>publish the port</strong> using the <code>-p</code> flag:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span>-p<span class="w"> </span><span class="m">8080</span>:5000<span class="w"> </span>--name<span class="w"> </span>mlflow-server<span class="w"> </span>mlflow:latest
+</span></code></pre></div>
+<p>This instruction tells the host operating system to establish a <strong>port forwarding rule</strong>:</p>
+<ol>
+<li><strong>Host Listening</strong>: The host machine starts listening on port <code>8080</code> on its physical network interface.</li>
+<li><strong>Forwarding Inbound Requests</strong>: Whenever an external user points their browser to <code>http://192.168.1.50:8080</code>, the host kernel intercepts the incoming packet, rewrites the destination to the container's private address (<code>172.17.0.2:5000</code>), and forwards it through the <code>docker0</code> bridge into the container.</li>
+<li><strong>Bidirectional Response</strong>: The container processes the request on port <code>5000</code> and returns the response back through the bridge to the user.</li>
+</ol>
+<hr />
+<h2 id="volumes-vs-bind-mounts-managing-data-durability">Volumes vs. Bind Mounts: Managing Data Durability<a class="headerlink" href="#volumes-vs-bind-mounts-managing-data-durability" title="Permanent link">&para;</a></h2>
+<p>Because the container's top writable layer is ephemeral and destroyed upon <code>docker rm</code>, machine learning workflows must persist datasets, model checkpoints, and logs outside the container lifecycle.</p>
+<p>Docker provides two primary mechanisms for mounting host storage:</p>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Bind Mount (<code>-v /host/path:/container/path</code>)</th>
+<th>Named Volume (<code>-v my_vol:/container/path</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Host Storage Location</strong></td>
+<td>Exact, user-specified arbitrary path on the host filesystem</td>
+<td>Managed directory created by Docker in <code>/var/lib/docker/volumes/&lt;name&gt;/_data</code></td>
+</tr>
+<tr>
+<td><strong>Filesystem Performance</strong></td>
+<td>Bypasses container copy-on-write; direct host filesystem speed</td>
+<td>Bypasses container copy-on-write; direct host filesystem speed</td>
+</tr>
+<tr>
+<td><strong>Management API</strong></td>
+<td>Managed manually by the host user / file permissions</td>
+<td>Managed via Docker CLI (<code>docker volume create</code>, <code>ls</code>, <code>rm</code>)</td>
+</tr>
+<tr>
+<td><strong>Portability Across Hosts</strong></td>
+<td>Low: depends on the host having that exact directory path</td>
+<td>High: decoupled from host directory structures; supports volume plugins</td>
+</tr>
+<tr>
+<td><strong>Primary ML Use Case</strong></td>
+<td>Local development (mounting source code for live edits) or mounting NVMe scratch drives</td>
+<td>Persisting database storage (PostgreSQL) or internal service caches</td>
+</tr>
+</tbody>
+</table>
+<p>Both bind mounts and named volumes bypass the container image layer filesystem entirely. File operations inside mounted directories execute as direct system calls against the host physical disk, eliminating copy-on-write overhead and providing native I/O performance.</p>
+<hr />
+<h2 id="why-docker-alone-fails-for-distributed-ml-pipelines">Why Docker Alone Fails for Distributed ML Pipelines<a class="headerlink" href="#why-docker-alone-fails-for-distributed-ml-pipelines" title="Permanent link">&para;</a></h2>
+<p>Docker successfully solves the reproducibility problem on a single node: it packages dependencies, isolates processes, limits memory, and ensures consistent runtime behavior. </p>
+<p>However, Docker is inherently a <strong>single-machine execution engine</strong>. When an engineering team moves from single-node experimentation to multi-machine ML pipelines, Docker alone fails across four structural boundaries:</p>
+<ol>
+<li><strong>Single-Machine Compute Ceiling</strong>:
+   A single physical host has a finite ceiling of CPU cores, RAM, and GPUs. If an ML pipeline requires running 50 concurrent hyperparameter tuning trials, or preprocessing a 10 TB dataset across 20 nodes, Docker has no native ability to discover other servers, allocate tasks across machines, or aggregate capacity.</li>
+<li><strong>No Cross-Machine Fault Recovery</strong>:
+   Docker includes container restart policies (<code>--restart=always</code> or <code>--restart=on-failure</code>). If a Python process crashes due to a memory spike, Docker restarts the container in place. However, if the underlying physical server loses power, suffers a hardware fault, or drops off the network, Docker terminates with the host. There is zero failover capability to reschedule that work onto a healthy server elsewhere in the fleet.</li>
+<li><strong>Absence of Cluster-Wide Resource Scheduling and Queueing</strong>:
+   Docker cannot evaluate a cluster of 50 machines, calculate which node has 16 GB of free RAM and an idle GPU, and place the container accordingly. If five engineers execute <code>docker run</code> on the same shared GPU box, Docker will launch all five containers simultaneously. The processes will contend for GPU compute, exhaust VRAM, and trigger mutual OOM kills.</li>
+<li><strong>Zero Native Pipeline Primitives</strong>:
+   A production ML workflow is not a single container; it is a multi-stage Directed Acyclic Graph (DAG):</li>
+<li>Data Ingestion -&gt; Feature Transformation -&gt; Distributed Training -&gt; Evaluation -&gt; Model Registration.</li>
+<li>Docker has no concept of step dependencies (e.g., "Run Container B only if Container A exits with code 0").</li>
+<li>It has no primitives for retrying a failed pipeline step with exponential backoff, passing intermediate artifacts between containers running on different hosts, or pausing execution for a human approval sign-off.</li>
+</ol>
+<p>To coordinate multi-container, multi-machine workflows, teams require a distributed orchestrator. This operational requirement leads directly to <strong>Kubernetes</strong>.</p>
+<p><em>(Detailed in the next document: <a href="../kubernetes/">Kubernetes Mechanics</a>).</em></p>
+<hr />
+<h3 id="official-documentation-further-reading">Official Documentation &amp; Further Reading<a class="headerlink" href="#official-documentation-further-reading" title="Permanent link">&para;</a></h3>
+<ul>
+<li><a href="https://docs.docker.com/get-started/">Docker Documentation: Get Started and Core Concepts</a></li>
+<li><a href="https://docs.docker.com/storage/storagedriver/overlayfs-driver/">Docker Documentation: Storage Drivers and OverlayFS</a></li>
+<li><a href="https://docs.docker.com/build/building/best-practices/">Docker Documentation: Dockerfile Best Practices</a></li>
+<li><a href="https://docs.docker.com/network/">Docker Documentation: Container Networking</a></li>
+<li><a href="https://docs.kernel.org/admin-guide/cgroup-v2.html">Linux Kernel Documentation: Control Groups v2</a></li>
+<li><a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">Linux Manual: Namespaces Overview</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../why-distributed/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Why Distributed Computing">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Why Distributed Computing
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../kubernetes/" class="md-footer__link md-footer__link--next" aria-label="Next: Kubernetes">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Kubernetes
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/tejask-42" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.footer", "search.highlight", "search.share", "content.code.copy", "content.code.annotate", "content.tooltips", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

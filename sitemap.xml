@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://tejask-42.github.io/ml-training-infrastructure/</loc>
+         <lastmod>2026-09-27</lastmod>
+    </url>
+    <url>
+         <loc>https://tejask-42.github.io/ml-training-infrastructure/argo-workflows/internals/</loc>
+         <lastmod>2026-09-27</lastmod>
+    </url>
+    <url>
+         <loc>https://tejask-42.github.io/ml-training-infrastructure/argo-workflows/why-argo/</loc>
+         <lastmod>2026-09-27</lastmod>
+    </url>
+    <url>
+         <loc>https://tejask-42.github.io/ml-training-infrastructure/experiments/data-movement/</loc>
+         <lastmod>2026-09-27</lastmod>
+    </url>
+    <url>
+         <loc>https://tejask-42.github.io/ml-training-infrastructure/foundations/docker/</loc>
+         <lastmod>2026-09-27</lastmod>
+    </url>
+    <url>
+         <loc>https://tejask-42.github.io/ml-training-infrastructure/foundations/kubernetes/</loc>
+         <lastmod>2026-09-27</lastmod>
+    </url>
+    <url>
+         <loc>https://tejask-42.github.io/ml-training-infrastructure/foundations/why-distributed/</loc>
+         <lastmod>2026-09-27</lastmod>
+    </url>
+</urlset>

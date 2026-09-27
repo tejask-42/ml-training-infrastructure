@@ -1,0 +1,997 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: ml-training-pipeline
+  namespace: argo
+spec:
+  # Default entrypoint: runs the full training pipeline (prep → train → eval → approve → promote)
+  entrypoint: main
+
+  # A 1 Gi PVC created per workflow run, mounted by steps that need shared scratch space.
+  # Ephemeral by design: deleted when the workflow completes.
+  volumeClaimTemplates:
+    - metadata:
+        name: results
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+
+  volumes:
+    # Raw input dataset: mount your own directory here before submitting.
+    # Update this path to point to your local dataset directory on the cluster node.
+    - name: training-data
+      hostPath:
+        path: /data/training-datasets
+        type: Directory
+
+    # All step scripts are kept in a ConfigMap (pipeline-scripts) and mounted here.
+    # See README.md for how to create the ConfigMap from the scripts/ directory.
+    - name: scripts
+      configMap:
+        name: pipeline-scripts
+        defaultMode: 0755
+
+    # Input data for the join-demo entrypoint.
+    # Update to point to your own multi-folder CSV input directory.
+    - name: join-demo-data
+      hostPath:
+        path: /data/join-demo-data
+        type: Directory
+
+  templates:
+
+    # =========================================================
+    # ENTRYPOINT 1 (default): full training pipeline
+    #
+    # DAG structure:
+    #   prep  ─────────────────────────────→  train → evaluate → approve → promote
+    #   flaky-demo (independent, retried)
+    #   lock-a, lock-b (concurrent, mutex-gated; run independently)
+    #
+    # The main pipeline (prep→train→evaluate→approve→promote) demonstrates:
+    #   - Artifact passing between steps through MinIO
+    #   - Human approval gate (suspend template, resumed with `argo resume`)
+    #   - Mutex concurrency (lock-a and lock-b compete for one slot)
+    #   - Automatic retry with exponential backoff (flaky-step)
+    # =========================================================
+    - name: main
+      dag:
+        tasks:
+          - name: prep
+            template: prep-data
+
+          # Demonstrates retry with exponential backoff; runs independently of the main chain.
+          - name: flaky-demo
+            template: flaky-step
+
+          # lock-a and lock-b both try to acquire the same mutex simultaneously.
+          # Only one runs at a time; the other waits. Priority decides queue order
+          # when multiple workflows are waiting across runs.
+          - name: lock-a
+            template: lock-worker
+            arguments:
+              parameters: [{name: label, value: "A"}]
+          - name: lock-b
+            template: lock-worker
+            arguments:
+              parameters: [{name: label, value: "B"}]
+
+          - name: train
+            template: train-xgboost
+            dependencies: [prep]
+            arguments:
+              artifacts:
+                - name: train-data
+                  from: "{{tasks.prep.outputs.artifacts.train-data}}"
+
+          - name: evaluate
+            template: eval-model
+            dependencies: [train]
+            arguments:
+              artifacts:
+                - name: test-data
+                  from: "{{tasks.prep.outputs.artifacts.test-data}}"
+                - name: model
+                  from: "{{tasks.train.outputs.artifacts.model}}"
+
+          # Suspend: no container is created. The workflow pauses here until
+          # an operator runs: argo resume <workflow-name> -n argo
+          - name: approve
+            template: human-approval
+            dependencies: [evaluate]
+
+          - name: promote
+            template: promote-model
+            dependencies: [approve, evaluate]
+            arguments:
+              artifacts:
+                - name: metrics
+                  from: "{{tasks.evaluate.outputs.artifacts.metrics}}"
+
+    - name: prep-data
+      outputs:
+        artifacts:
+          - name: train-data
+            path: /out/train.parquet
+          - name: test-data
+            path: /out/test.parquet
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args: ["pip install --quiet pandas scikit-learn pyarrow && mkdir -p /out && python /scripts/prep.py"]
+        volumeMounts:
+          - name: training-data
+            mountPath: /data
+            readOnly: true
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "2", memory: "6Gi" }
+          limits: { memory: "10Gi" }
+
+    # Randomly fails ~50% of the time. retryStrategy retries up to 4 times
+    # with exponential backoff (5s, 10s, 20s, 40s). Demonstrates Argo's
+    # automatic per-step fault recovery without failing the whole pipeline.
+    - name: flaky-step
+      retryStrategy:
+        limit: 4
+        retryPolicy: OnFailure
+        backoff: { duration: "5s", factor: "2" }
+      container:
+        image: python:3.11-slim
+        command: [python, /scripts/flaky.py]
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "100m", memory: "128Mi" }
+
+    # Acquires a named mutex before running and releases it on exit.
+    # Scoped to this template only (spec.templates[].synchronization),
+    # so only the lock-holding step is blocked, not the whole pipeline.
+    - name: lock-worker
+      inputs:
+        parameters:
+          - name: label
+      synchronization:
+        mutexes:
+          - name: pipeline-demo-mutex
+      container:
+        image: python:3.11-slim
+        command: [python, -c]
+        args:
+          - |
+            import time, datetime
+            label = "{{inputs.parameters.label}}"
+            print(f"[{label}] ACQUIRED lock at {datetime.datetime.now().isoformat()}", flush=True)
+            time.sleep(20)
+            print(f"[{label}] RELEASING lock at {datetime.datetime.now().isoformat()}", flush=True)
+        resources:
+          requests: { cpu: "100m", memory: "128Mi" }
+
+    - name: train-xgboost
+      inputs:
+        artifacts:
+          - name: train-data
+            path: /in/train.parquet
+      outputs:
+        artifacts:
+          - name: model
+            path: /out/model.json
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args: ["pip install --quiet pandas xgboost scikit-learn pyarrow && mkdir -p /out && python /scripts/train.py"]
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "4", memory: "8Gi" }
+          limits: { memory: "12Gi" }
+
+    - name: eval-model
+      inputs:
+        artifacts:
+          - name: test-data
+            path: /in/test.parquet
+          - name: model
+            path: /in/model.json
+      outputs:
+        artifacts:
+          - name: metrics
+            path: /out/metrics.json
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args: ["pip install --quiet pandas xgboost scikit-learn pyarrow && mkdir -p /out && python /scripts/evaluate.py"]
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "2", memory: "4Gi" }
+          limits: { memory: "6Gi" }
+
+    # Pure pause: creates no pod or container. The workflow controller marks this
+    # node as "Running/Suspended" and waits indefinitely (or until a timeout if set).
+    # Resume with: argo resume <workflow-name> -n argo
+    - name: human-approval
+      suspend: {}
+
+    - name: promote-model
+      inputs:
+        artifacts:
+          - name: metrics
+            path: /in/metrics.json
+      container:
+        image: python:3.11-slim
+        command: [bash, /scripts/promote.sh]
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "100m", memory: "128Mi" }
+
+    # =========================================================
+    # ENTRYPOINT 2: hp-tuning
+    #
+    # Hyperparameter tuning: pick-the-single-best pattern.
+    # list-configs outputs a JSON array of hyperparameter sets.
+    # withParam fans that out into N parallel trial pods.
+    # select-best collects all trial outputs and picks the winner.
+    #
+    # All trial pods run concurrently (subject to cluster resource limits).
+    # The gathered result in select-best is a JSON array of every
+    # trial's output, with failed trials excluded by default.
+    # =========================================================
+    - name: hp-tuning
+      dag:
+        tasks:
+          - name: prep
+            template: prep-data
+          - name: list-configs
+            template: list-configs
+          - name: train-eval
+            template: trial
+            dependencies: [prep, list-configs]
+            withParam: "{{tasks.list-configs.outputs.result}}"
+            arguments:
+              parameters:
+                - name: cfg-id
+                  value: "{{item.id}}"
+                - name: max-depth
+                  value: "{{item.max_depth}}"
+                - name: learning-rate
+                  value: "{{item.learning_rate}}"
+                - name: n-estimators
+                  value: "{{item.n_estimators}}"
+              artifacts:
+                - name: train-data
+                  from: "{{tasks.prep.outputs.artifacts.train-data}}"
+                - name: test-data
+                  from: "{{tasks.prep.outputs.artifacts.test-data}}"
+          - name: select-best
+            template: select-best
+            dependencies: [train-eval]
+
+    # =========================================================
+    # ENTRYPOINT 3: hp-tuning-gated
+    #
+    # Hyperparameter tuning: gate-and-promote-all-that-pass pattern.
+    # Each trial runs independently. After training, a `when:` condition
+    # checks if F1 > 0.70. Trials that pass the threshold each independently
+    # trigger their own promote step. Multiple configs can be promoted.
+    #
+    # Difference from hp-tuning (ENTRYPOINT 2):
+    #   - hp-tuning: centralised selection after all trials finish
+    #   - hp-tuning-gated: distributed, per-trial conditional gate
+    # =========================================================
+    - name: hp-tuning-gated
+      dag:
+        tasks:
+          - name: prep
+            template: prep-data
+          - name: list-configs
+            template: list-configs
+          - name: run-trial
+            template: trial-and-gate
+            dependencies: [prep, list-configs]
+            withParam: "{{tasks.list-configs.outputs.result}}"
+            arguments:
+              parameters:
+                - name: cfg-id
+                  value: "{{item.id}}"
+                - name: max-depth
+                  value: "{{item.max_depth}}"
+                - name: learning-rate
+                  value: "{{item.learning_rate}}"
+                - name: n-estimators
+                  value: "{{item.n_estimators}}"
+              artifacts:
+                - name: train-data
+                  from: "{{tasks.prep.outputs.artifacts.train-data}}"
+                - name: test-data
+                  from: "{{tasks.prep.outputs.artifacts.test-data}}"
+
+    # Nested DAG: one instance per withParam item (one per hyperparameter config).
+    # Each instance runs its own train → conditional-promote chain independently.
+    - name: trial-and-gate
+      inputs:
+        parameters:
+          - name: cfg-id
+          - name: max-depth
+          - name: learning-rate
+          - name: n-estimators
+        artifacts:
+          - name: train-data
+          - name: test-data
+      dag:
+        tasks:
+          - name: train-eval
+            template: trial
+            arguments:
+              parameters:
+                - name: cfg-id
+                  value: "{{inputs.parameters.cfg-id}}"
+                - name: max-depth
+                  value: "{{inputs.parameters.max-depth}}"
+                - name: learning-rate
+                  value: "{{inputs.parameters.learning-rate}}"
+                - name: n-estimators
+                  value: "{{inputs.parameters.n-estimators}}"
+              artifacts:
+                - name: train-data
+                  from: "{{inputs.artifacts.train-data}}"
+                - name: test-data
+                  from: "{{inputs.artifacts.test-data}}"
+          # when: evaluates the output parameter directly from the trial step's status.
+          # No pod is created if the condition is false: zero overhead for failing configs.
+          - name: continue-if-good
+            template: promote-trial
+            dependencies: [train-eval]
+            when: "{{tasks.train-eval.outputs.parameters.f1}} > 0.70"
+            arguments:
+              parameters:
+                - name: cfg-id
+                  value: "{{inputs.parameters.cfg-id}}"
+                - name: f1
+                  value: "{{tasks.train-eval.outputs.parameters.f1}}"
+
+    - name: list-configs
+      container:
+        image: python:3.11-slim
+        command: [python, /scripts/list-configs.py]
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "100m", memory: "128Mi" }
+
+    - name: trial
+      inputs:
+        parameters:
+          - name: cfg-id
+          - name: max-depth
+          - name: learning-rate
+          - name: n-estimators
+        artifacts:
+          - name: train-data
+            path: /in/train.parquet
+          - name: test-data
+            path: /in/test.parquet
+      outputs:
+        parameters:
+          # The sidecar reads /out/f1.txt after the main container exits and stores
+          # the value as a string in Workflow.status.nodes[<id>].outputs.parameters.
+          - name: f1
+            valueFrom:
+              path: /out/f1.txt
+      container:
+        image: python:3.11-slim
+        command: [python, /scripts/trial.py]
+        env:
+          - name: CFG_ID
+            value: "{{inputs.parameters.cfg-id}}"
+          - name: MAX_DEPTH
+            value: "{{inputs.parameters.max-depth}}"
+          - name: LEARNING_RATE
+            value: "{{inputs.parameters.learning-rate}}"
+          - name: N_ESTIMATORS
+            value: "{{inputs.parameters.n-estimators}}"
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+          - name: results
+            mountPath: /results
+        resources:
+          requests: { cpu: "2", memory: "4Gi" }
+          limits: { memory: "6Gi" }
+
+    - name: select-best
+      container:
+        image: python:3.11-slim
+        command: [python, /scripts/select-best.py]
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+          - name: results
+            mountPath: /results
+        resources:
+          requests: { cpu: "100m", memory: "128Mi" }
+
+    - name: promote-trial
+      inputs:
+        parameters:
+          - name: cfg-id
+          - name: f1
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args:
+          - |
+            mkdir -p /results
+            cat > /results/promoted-{{inputs.parameters.cfg-id}}.json << EOF
+            {"cfg_id": "{{inputs.parameters.cfg-id}}", "f1": {{inputs.parameters.f1}}, "promoted": true}
+            EOF
+            echo "Config {{inputs.parameters.cfg-id}} passed the F1 gate (F1={{inputs.parameters.f1}} > 0.70)"
+        volumeMounts:
+          - name: results
+            mountPath: /results
+        resources:
+          requests: { cpu: "100m", memory: "64Mi" }
+
+    # =========================================================
+    # ENTRYPOINT 4: conditional-gate
+    #
+    # Demonstrates Argo's `when:` conditional, evaluated by the
+    # workflow-controller against already-materialized parameter values.
+    # No pod is created for a step whose `when:` evaluates false.
+    # =========================================================
+    - name: conditional-gate
+      dag:
+        tasks:
+          - name: clean
+            template: clean-data
+          - name: proceed
+            template: downstream-step
+            dependencies: [clean]
+            when: "{{tasks.clean.outputs.parameters.missing-pct}} < 20"
+
+    - name: clean-data
+      outputs:
+        parameters:
+          - name: missing-pct
+            valueFrom:
+              path: /out/missing_pct.txt
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args: ["pip install --quiet pandas && mkdir -p /out && python /scripts/clean-check.py"]
+        volumeMounts:
+          - name: training-data
+            mountPath: /data
+            readOnly: true
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "500m", memory: "1Gi" }
+
+    - name: downstream-step
+      container:
+        image: python:3.11-slim
+        command: [echo, "Proceeding: missing% was under threshold, safe to continue"]
+        resources:
+          requests: { cpu: "100m", memory: "64Mi" }
+
+    # =========================================================
+    # ENTRYPOINT 5: sync-hold
+    #
+    # Used with the Workflow-level synchronization examples in
+    # sync-priority-demo/: submit two Workflows using this template
+    # with different spec.priority values to observe priority-based
+    # mutex queuing across separate Workflow objects.
+    #
+    # Synchronization and priority are set on the *submitting Workflow*
+    # spec (not here), so this template stays reusable on its own.
+    # =========================================================
+    - name: sync-hold
+      inputs:
+        parameters:
+          - name: label
+      container:
+        image: python:3.11-slim
+        command: [python, -c]
+        args:
+          - |
+            import time, datetime
+            label = "{{inputs.parameters.label}}"
+            print(f"[{label}] ACQUIRED at {datetime.datetime.now().isoformat()}", flush=True)
+            time.sleep(25)
+            print(f"[{label}] RELEASING at {datetime.datetime.now().isoformat()}", flush=True)
+        resources:
+          requests: { cpu: "100m", memory: "128Mi" }
+
+    # =========================================================
+    # ENTRYPOINT 6: data-passing-demo
+    #
+    # Exercises every distinct data-movement mechanism side by side:
+    #   (1) Small string parameters: live only in Workflow.status, no object store
+    #   (2) Artifact through MinIO with default tar.gz archiving
+    #   (3) Same artifact with archive:none (raw file, no compression)
+    #   (4) Input artifact pulled from a raw HTTP URL, bypassing MinIO entirely
+    #   (5) Shared PVC: two separate pods reading/writing the same physical disk,
+    #       no upload/download at all
+    # =========================================================
+    - name: data-passing-demo
+      dag:
+        tasks:
+          - name: param-produce
+            template: emit-param
+          - name: param-consume
+            depends: "param-produce"
+            template: use-param
+            arguments:
+              parameters:
+                - name: count
+                  value: "{{tasks.param-produce.outputs.parameters.count}}"
+
+          - name: artifact-produce-default
+            template: emit-file-default
+          - name: artifact-produce-raw
+            template: emit-file-raw
+          - name: artifact-consume
+            depends: "artifact-produce-default && artifact-produce-raw"
+            template: use-files
+            arguments:
+              artifacts:
+                - name: report
+                  from: "{{tasks.artifact-produce-default.outputs.artifacts.report}}"
+                - name: report-raw
+                  from: "{{tasks.artifact-produce-raw.outputs.artifacts.report-raw}}"
+
+          - name: http-pull
+            template: pull-http-artifact
+
+          - name: pvc-write
+            template: write-shared-pvc
+          - name: pvc-read
+            depends: "pvc-write"
+            template: read-shared-pvc
+
+    - name: emit-param
+      outputs:
+        parameters:
+          - name: count
+            valueFrom:
+              path: /tmp/count.txt
+      script:
+        image: python:3.11-slim
+        command: [python]
+        source: |
+          import random
+          n = random.randint(1, 1000)
+          print(f"producing count={n}")
+          with open("/tmp/count.txt", "w") as f:
+              f.write(str(n))
+
+    - name: use-param
+      inputs:
+        parameters:
+          - name: count
+      container:
+        image: python:3.11-slim
+        command: [python, -c]
+        args:
+          - |
+            count = "{{inputs.parameters.count}}"
+            print(f"received count parameter = {count}")
+            print("this value was never written to a file or object store --")
+            print("it lives only in the Workflow object's own status field")
+
+    - name: emit-file-default
+      outputs:
+        artifacts:
+          - name: report
+            path: /out/report.txt
+      script:
+        image: python:3.11-slim
+        command: [bash, -c]
+        source: |
+          mkdir -p /out
+          echo "generated at $(date -Iseconds) -- this file flows through" > /out/report.txt
+          echo "the default artifact repository (MinIO), tar.gz archived" >> /out/report.txt
+
+    - name: emit-file-raw
+      outputs:
+        artifacts:
+          - name: report-raw
+            path: /out/report-raw.txt
+            archive:
+              none: {}
+      script:
+        image: python:3.11-slim
+        command: [bash, -c]
+        source: |
+          mkdir -p /out
+          echo "generated at $(date -Iseconds) -- archive.none means" > /out/report-raw.txt
+          echo "this lands in MinIO as a plain uncompressed file, not .tgz" >> /out/report-raw.txt
+
+    - name: use-files
+      inputs:
+        artifacts:
+          - name: report
+            path: /in/report.txt
+          - name: report-raw
+            path: /in/report-raw.txt
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args:
+          - |
+            echo "--- default-archived artifact, downloaded + auto-extracted ---"
+            cat /in/report.txt
+            echo "--- archive:none artifact, downloaded as-is ---"
+            cat /in/report-raw.txt
+
+    - name: pull-http-artifact
+      inputs:
+        artifacts:
+          - name: source
+            path: /in/readme.md
+            http:
+              url: https://raw.githubusercontent.com/argoproj/argo-workflows/main/README.md
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args:
+          - |
+            echo "pulled directly from HTTP, never touched MinIO:"
+            wc -l /in/readme.md
+            head -5 /in/readme.md
+
+    - name: write-shared-pvc
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args:
+          - |
+            mkdir -p /results/passing-demo
+            echo "written by pvc-write at $(date -Iseconds)" > /results/passing-demo/hello.txt
+            echo "wrote /results/passing-demo/hello.txt on the shared PVC"
+        volumeMounts:
+          - name: results
+            mountPath: /results
+
+    - name: read-shared-pvc
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args:
+          - |
+            echo "reading the SAME disk the previous, separate pod wrote to:"
+            cat /results/passing-demo/hello.txt
+        volumeMounts:
+          - name: results
+            mountPath: /results
+
+    # =========================================================
+    # ENTRYPOINT 7: join-demo
+    #
+    # Demonstrates precise artifact key control and non-uniform
+    # selection from a fan-out.
+    #
+    # clean: fans out over 3 folders x 4 files via withParam.
+    #   Each pod writes its cleaned output to an explicit, meaningful
+    #   S3 key (archive:none so each lands as its own raw object).
+    #
+    # join: reads a non-uniform selection of those files (e.g. files
+    #   1+3 from folder1, 2+3 from folder2) from a ConfigMap manifest,
+    #   then fetches only those specific objects directly from MinIO
+    #   via boto3 (bypassing Argo's inputs.artifacts mechanism,
+    #   which can only express one exact key or one prefix at a time).
+    # =========================================================
+    - name: join-demo
+      dag:
+        tasks:
+          - name: clean
+            template: clean-file
+            arguments:
+              parameters:
+                - name: folder
+                  value: "{{item.folder}}"
+                - name: filename
+                  value: "{{item.filename}}"
+            withParam: >-
+              [
+                {"folder":"folder1","filename":"file1.csv"},
+                {"folder":"folder1","filename":"file2.csv"},
+                {"folder":"folder1","filename":"file3.csv"},
+                {"folder":"folder1","filename":"file4.csv"},
+                {"folder":"folder2","filename":"file1.csv"},
+                {"folder":"folder2","filename":"file2.csv"},
+                {"folder":"folder2","filename":"file3.csv"},
+                {"folder":"folder2","filename":"file4.csv"},
+                {"folder":"folder3","filename":"file1.csv"},
+                {"folder":"folder3","filename":"file2.csv"},
+                {"folder":"folder3","filename":"file3.csv"},
+                {"folder":"folder3","filename":"file4.csv"}
+              ]
+          - name: join
+            template: join-files
+            depends: "clean"
+
+    - name: clean-file
+      inputs:
+        parameters:
+          - name: folder
+          - name: filename
+      outputs:
+        artifacts:
+          - name: cleaned
+            path: "/out/{{inputs.parameters.filename}}"
+            archive:
+              none: {}
+            s3:
+              endpoint: minio:9000
+              bucket: my-bucket
+              insecure: true
+              key: "cleaned/{{inputs.parameters.folder}}/{{inputs.parameters.filename}}"
+              accessKeySecret:
+                name: my-minio-cred
+                key: accesskey
+              secretKeySecret:
+                name: my-minio-cred
+                key: secretkey
+      container:
+        image: python:3.11-slim
+        command: [python, /scripts/clean_join_demo.py]
+        env:
+          - name: FOLDER
+            value: "{{inputs.parameters.folder}}"
+          - name: FILENAME
+            value: "{{inputs.parameters.filename}}"
+        volumeMounts:
+          - name: join-demo-data
+            mountPath: /in
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "100m", memory: "128Mi" }
+
+    - name: join-files
+      inputs:
+        parameters:
+          - name: join-manifest
+            valueFrom:
+              configMapKeyRef:
+                name: join-manifest
+                key: manifest
+      outputs:
+        artifacts:
+          - name: joined-output
+            path: /results/joined_output.csv
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args: ["pip install --quiet boto3 && python /scripts/join_demo.py"]
+        env:
+          - name: JOIN_MANIFEST
+            value: "{{inputs.parameters.join-manifest}}"
+          - name: MINIO_ENDPOINT
+            value: "minio:9000"
+          - name: MINIO_BUCKET
+            value: "my-bucket"
+          - name: MINIO_ACCESS_KEY
+            valueFrom:
+              secretKeyRef: { name: my-minio-cred, key: accesskey }
+          - name: MINIO_SECRET_KEY
+            valueFrom:
+              secretKeyRef: { name: my-minio-cred, key: secretkey }
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "200m", memory: "256Mi" }
+
+    # =========================================================
+    # ENTRYPOINT 8: pv-vs-object-storage
+    #
+    # Two parallel 4-hop chains passing the same 300 MB file forward:
+    #   - PV chain: reads/writes the same physical disk, zero network
+    #   - Object storage chain: genuine upload+download at every hop
+    #     through MinIO (archive:none to avoid gzip cost muddying the timing)
+    #
+    # Compare hop durations with: argo get <name> -n argo
+    # Expected: PV chain is faster per hop but fails at scale
+    # (see docs/experiments/data-movement.md for the analysis).
+    # =========================================================
+    - name: pv-vs-object-storage
+      dag:
+        tasks:
+          - name: pv-write
+            template: pv-write-big
+          - name: pv-relay-1
+            template: pv-relay
+            depends: "pv-write"
+            arguments: { parameters: [{name: hop, value: "1"}] }
+          - name: pv-relay-2
+            template: pv-relay
+            depends: "pv-relay-1"
+            arguments: { parameters: [{name: hop, value: "2"}] }
+          - name: pv-relay-3
+            template: pv-relay
+            depends: "pv-relay-2"
+            arguments: { parameters: [{name: hop, value: "3"}] }
+          - name: pv-relay-4
+            template: pv-relay
+            depends: "pv-relay-3"
+            arguments: { parameters: [{name: hop, value: "4"}] }
+
+          - name: obj-write
+            template: obj-write-big
+          - name: obj-relay-1
+            template: obj-relay
+            depends: "obj-write"
+            arguments:
+              parameters: [{name: hop, value: "1"}]
+              artifacts: [{name: bigfile, from: "{{tasks.obj-write.outputs.artifacts.bigfile}}"}]
+          - name: obj-relay-2
+            template: obj-relay
+            depends: "obj-relay-1"
+            arguments:
+              parameters: [{name: hop, value: "2"}]
+              artifacts: [{name: bigfile, from: "{{tasks.obj-relay-1.outputs.artifacts.bigfile}}"}]
+          - name: obj-relay-3
+            template: obj-relay
+            depends: "obj-relay-2"
+            arguments:
+              parameters: [{name: hop, value: "3"}]
+              artifacts: [{name: bigfile, from: "{{tasks.obj-relay-2.outputs.artifacts.bigfile}}"}]
+          - name: obj-relay-4
+            template: obj-relay
+            depends: "obj-relay-3"
+            arguments:
+              parameters: [{name: hop, value: "4"}]
+              artifacts: [{name: bigfile, from: "{{tasks.obj-relay-3.outputs.artifacts.bigfile}}"}]
+
+    - name: pv-write-big
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args:
+          - |
+            set -e
+            mkdir -p /results/relay
+            echo "[pv-write] start $(date -Iseconds)"
+            dd if=/dev/urandom of=/results/relay/bigfile.bin bs=1M count=300 2>&1 | tail -1
+            sha256sum /results/relay/bigfile.bin
+            echo "[pv-write] done $(date -Iseconds)"
+        volumeMounts:
+          - name: results
+            mountPath: /results
+        resources:
+          requests: { cpu: "200m", memory: "256Mi" }
+
+    - name: pv-relay
+      inputs:
+        parameters:
+          - name: hop
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args:
+          - |
+            set -e
+            echo "[pv-relay-{{inputs.parameters.hop}}] start $(date -Iseconds)"
+            sha256sum /results/relay/bigfile.bin
+            echo "[pv-relay-{{inputs.parameters.hop}}] done $(date -Iseconds)"
+        volumeMounts:
+          - name: results
+            mountPath: /results
+        resources:
+          requests: { cpu: "200m", memory: "256Mi" }
+
+    - name: obj-write-big
+      outputs:
+        artifacts:
+          - name: bigfile
+            path: /out/bigfile.bin
+            archive:
+              none: {}
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args:
+          - |
+            set -e
+            mkdir -p /out
+            echo "[obj-write] start $(date -Iseconds)"
+            dd if=/dev/urandom of=/out/bigfile.bin bs=1M count=300 2>&1 | tail -1
+            sha256sum /out/bigfile.bin
+            echo "[obj-write] done $(date -Iseconds), now uploading..."
+        resources:
+          requests: { cpu: "200m", memory: "256Mi" }
+
+    - name: obj-relay
+      inputs:
+        parameters:
+          - name: hop
+        artifacts:
+          - name: bigfile
+            path: /in/bigfile.bin
+      outputs:
+        artifacts:
+          - name: bigfile
+            path: /in/bigfile.bin
+            archive:
+              none: {}
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args:
+          - |
+            set -e
+            echo "[obj-relay-{{inputs.parameters.hop}}] start (input downloaded by init container) $(date -Iseconds)"
+            sha256sum /in/bigfile.bin
+            echo "[obj-relay-{{inputs.parameters.hop}}] done $(date -Iseconds), now re-uploading..."
+        resources:
+          requests: { cpu: "200m", memory: "256Mi" }
+
+    # =========================================================
+    # ENTRYPOINT 9: parallel-selective-process
+    #
+    # 3 parallel processes, each fanned out via withParam.
+    # Each reads its own distinct file-list manifest from the SAME
+    # ConfigMap, with the key name resolved from the loop item value
+    # (configMapKeyRef.key: "{{item}}").
+    #
+    # Demonstrates that configMapKeyRef.key accepts templated values
+    # resolved at the *calling* task's arguments level, not inside
+    # the template's own inputs.
+    # =========================================================
+    - name: parallel-selective-process
+      dag:
+        tasks:
+          - name: run-process
+            template: process-files
+            withParam: '["1", "2", "3"]'
+            arguments:
+              parameters:
+                - name: process-id
+                  value: "{{item}}"
+                - name: manifest
+                  valueFrom:
+                    configMapKeyRef:
+                      name: process-manifests
+                      key: "{{item}}"
+
+    - name: process-files
+      inputs:
+        parameters:
+          - name: process-id
+          - name: manifest
+      container:
+        image: python:3.11-slim
+        command: [bash, -c]
+        args: ["pip install --quiet boto3 && python /scripts/process_selective.py"]
+        env:
+          - name: PROCESS_ID
+            value: "{{inputs.parameters.process-id}}"
+          - name: FILE_MANIFEST
+            value: "{{inputs.parameters.manifest}}"
+          - name: MINIO_ENDPOINT
+            value: "minio:9000"
+          - name: MINIO_BUCKET
+            value: "my-bucket"
+          - name: MINIO_ACCESS_KEY
+            valueFrom:
+              secretKeyRef: { name: my-minio-cred, key: accesskey }
+          - name: MINIO_SECRET_KEY
+            valueFrom:
+              secretKeyRef: { name: my-minio-cred, key: secretkey }
+        volumeMounts:
+          - name: scripts
+            mountPath: /scripts
+        resources:
+          requests: { cpu: "200m", memory: "256Mi" }

@@ -1,0 +1,87 @@
+site_name: ML Training Infrastructure
+site_description: >
+  A from-first-principles study of ML pipeline orchestration on Kubernetes:
+  container primitives, Argo Workflows DAG orchestration, and empirical benchmarks
+  on data movement patterns at scale.
+site_url: https://tejask-42.github.io/ml-training-infrastructure
+repo_url: https://github.com/tejask-42/ml-training-infrastructure
+repo_name: tejask-42/ml-training-infrastructure
+edit_uri: ""
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tooltips
+    - toc.follow
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+nav:
+  - Home: index.md
+  - Foundations:
+    - Why Distributed Computing: foundations/why-distributed.md
+    - Docker: foundations/docker.md
+    - Kubernetes: foundations/kubernetes.md
+  - Argo Workflows:
+    - Why Argo: argo-workflows/why-argo.md
+    - Internals: argo-workflows/internals.md
+  - Experiments:
+    - Data Movement at Scale: experiments/data-movement.md
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - tables
+  - attr_list
+  - md_in_html
+  - footnotes
+  - toc:
+      permalink: true
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/tejask-42
